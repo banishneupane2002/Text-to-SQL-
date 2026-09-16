@@ -1,0 +1,53 @@
+# =====================================================================
+# ApexBank Text-to-SQL — Business Glossary & Domain Semantics
+# =====================================================================
+# This file is 100% decoupled from Python code.
+# When connecting to a new database (e.g. Healthcare, Retail, or another Bank),
+# simply update or clear this file.
+# If this file is empty or missing, the system runs dynamically on pure column names!
+
+# 1. Custom Domain Categorizations (Optional)
+# If not specified, domains are generated dynamically from table names.
+domains:
+  "Accounts & Transactions":
+    description: "Account balances, deposits, withdrawals, transfers, and bank statements."
+    tables: ["account", "trans", "order"]
+  "Loans & Credit":
+    description: "Loan requests, payments, amounts, duration, and debt status."
+    tables: ["loan"]
+  "Cards & Services":
+    description: "Credit cards, debit cards, card types (classic, gold, junior)."
+    tables: ["card", "disp"]
+  "Clients & Demographics":
+    description: "Client personal details, gender, age, district, and regional population."
+    tables: ["client", "district"]
+
+# 2. Cryptic Value Mappings (Translates business slang/codes to DB values)
+# Essential for databases with coded flags (like 'A', 'B', 'PRIJEM', 'SIPO')
+codes:
+  "loan.status":
+    "A": "Contract finished, loan paid in full (Good standing)"
+    "B": "Contract finished, loan not paid (Defaulted / Bad debt)"
+    "C": "Running contract, payments OK (Current)"
+    "D": "Running contract, client in debt (Delinquent)"
+  "trans.type":
+    "PRIJEM": "Credit / Deposit / Money in"
+    "VYDAJ": "Debit / Withdrawal / Money out"
+  "trans.k_symbol":
+    "SIPO": "Household / utility bill payment"
+    "UROK": "Interest credited by bank"
+    "POJISTNE": "Insurance policy payment"
+    "DUCHOD": "Old-age pension payment"
+    "UVER": "Loan payment"
+  "card.type":
+    "junior": "Junior debit card"
+    "classic": "Classic credit card"
+    "gold": "Gold premium credit card"
+
+# 3. Business Synonyms (Helps table search when user uses natural slang)
+synonyms:
+  client: ["customer", "person", "account holder", "individual", "borrower"]
+  trans: ["transaction", "deposit", "withdrawal", "payment", "transfer", "wire"]
+  loan: ["debt", "credit", "borrowing", "lending"]
+  account: ["bank account", "checking", "savings"]
+

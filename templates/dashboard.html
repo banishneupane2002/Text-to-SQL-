@@ -1,0 +1,602 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- LEFT COLUMN: Query Input, Generated SQL, and Live Data Table (8 cols) -->
+    <div class="lg:col-span-8 space-y-6">
+
+        <!-- 1. Search & Natural Language Query Box -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+            <!-- Subtle gradient glow -->
+            <div class="absolute -top-24 -right-24 w-60 h-60 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div class="flex items-center justify-between mb-3">
+                <label for="query-input" class="text-sm font-semibold text-slate-200 flex items-center space-x-2">
+                    <i class="fa-solid fa-wand-magic-sparkles text-indigo-400"></i>
+                    <span>Ask a Banking Question in Plain English</span>
+                </label>
+                <span class="text-xs text-slate-400">Press <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-[10px]">Ctrl+Enter</kbd> to run</span>
+            </div>
+
+            <!-- Input area -->
+            <div class="relative">
+                <textarea id="query-input" rows="4" 
+                    placeholder="e.g. Show top 5 accounts with largest loan amounts and their status..."
+                    class="w-full bg-slate-950/80 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition resize-none"></textarea>
+                
+                <div class="absolute right-3 bottom-3 flex items-center space-x-2">
+                    <button id="clear-btn" onclick="clearQuery()" class="text-slate-500 hover:text-slate-300 p-1.5 rounded-lg text-xs transition" title="Clear">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                    <button id="run-btn" onclick="executeQuery()" class="inline-flex items-center space-x-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-medium text-xs shadow-md shadow-indigo-600/30 transition disabled:opacity-50">
+                        <i class="fa-solid fa-play"></i>
+                        <span>Generate & Run</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Suggestion Chips -->
+            <div class="mt-3 flex items-center flex-wrap gap-2">
+                <span class="text-xs text-slate-400 font-medium mr-1">Try:</span>
+                {% for s in suggestions %}
+                <button onclick="setQuery('{{ s.question|escapejs }}')" 
+                    class="text-xs px-2.5 py-1 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60 hover:border-indigo-500/40 transition">
+                    {{ s.badge }}
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- 2. Loading State Indicator (Hidden by default) -->
+        <div id="loading-state" class="hidden bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-lg">
+            <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-500/10 text-indigo-400 mb-3 animate-spin">
+                <i class="fa-solid fa-circle-notch text-xl"></i>
+            </div>
+            <h3 class="text-sm font-semibold text-slate-200" id="loading-step-title">Analyzing Question & Schema...</h3>
+            <p class="text-xs text-slate-400 mt-1" id="loading-step-desc">Discovering dynamic foreign keys and querying Groq LLM for T-SQL.</p>
+        </div>
+
+        <!-- 3. Conversational / Chit-Chat Response (Hidden by default) -->
+        <div id="chit-chat-card" class="hidden bg-slate-900 border border-indigo-500/30 rounded-2xl p-5 shadow-lg flex items-start space-x-4">
+            <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center flex-shrink-0">
+                <i class="fa-solid fa-comments text-lg"></i>
+            </div>
+            <div>
+                <h4 class="text-sm font-semibold text-indigo-300">Bank Assistant Response</h4>
+                <p id="chit-chat-text" class="text-sm text-slate-300 mt-1"></p>
+            </div>
+        </div>
+
+        <!-- 4. Security or Execution Error Notice (Hidden by default) -->
+        <div id="error-card" class="hidden bg-rose-950/40 border border-rose-800/60 rounded-2xl p-5 shadow-lg flex items-start space-x-4">
+            <div class="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center flex-shrink-0">
+                <i class="fa-solid fa-shield-halved text-lg"></i>
+            </div>
+            <div class="flex-1">
+                <h4 class="text-sm font-semibold text-rose-300" id="error-title">Security Guardrail / Query Alert</h4>
+                <p id="error-desc" class="text-xs font-mono text-rose-200 mt-1 break-words"></p>
+            </div>
+        </div>
+
+        <!-- 5. Generated SQL & Analysis Panel (Hidden initially) -->
+        <div id="sql-results-panel" class="hidden space-y-6">
+
+            <!-- SQL Code Card -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                <!-- Card Header -->
+                <div class="bg-slate-800/60 px-5 py-3 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+                    <div class="flex items-center space-x-2">
+                        <span class="px-2 py-0.5 text-xs font-bold font-mono uppercase rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">T-SQL</span>
+                        <span class="text-xs font-semibold text-slate-300">Generated Microsoft SQL Server Query</span>
+                        <span id="domain-badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 font-medium">Loans</span>
+                    </div>
+                    
+                    <div class="flex items-center space-x-3 text-xs">
+                        <span class="text-slate-400 font-mono flex items-center space-x-1">
+                            <i class="fa-solid fa-bolt text-amber-400"></i>
+                            <span id="time-badge">0ms</span>
+                        </span>
+                        <button onclick="copySQL()" class="inline-flex items-center space-x-1 text-slate-300 hover:text-white px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 transition" title="Copy SQL">
+                            <i class="fa-regular fa-copy"></i>
+                            <span id="copy-text">Copy</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Code block with PrismJS -->
+                <div class="p-4 bg-slate-950 font-mono text-sm overflow-x-auto">
+                    <pre class="!bg-transparent !p-0 !m-0"><code id="sql-code-display" class="language-sql">-- Query will appear here</code></pre>
+                </div>
+
+                <!-- Plain English Explanation Banner -->
+                <div class="bg-slate-800/40 px-5 py-3 border-t border-slate-800/80 flex items-start space-x-3">
+                    <i class="fa-regular fa-lightbulb text-amber-400 text-sm mt-0.5 flex-shrink-0"></i>
+                    <div class="text-xs text-slate-300 leading-relaxed" id="sql-explanation-text">
+                        Explanation...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Data Table Card -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                <!-- Card Header -->
+                <div class="px-5 py-3.5 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs">
+                            <i class="fa-solid fa-table"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-sm font-semibold text-slate-200">Live Result Preview</h3>
+                            <p class="text-xs text-slate-400" id="table-row-count">0 rows retrieved from database</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center space-x-2">
+                        <!-- Search filter for table -->
+                        <div class="relative">
+                            <input type="text" id="table-filter-input" onkeyup="filterTable()" placeholder="Filter rows..." 
+                                class="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-36">
+                        </div>
+                        <!-- CSV Export Button -->
+                        <button onclick="exportCSV()" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition">
+                            <i class="fa-solid fa-download text-emerald-400"></i>
+                            <span>Export CSV</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Scrollable Table Container -->
+                <div class="overflow-x-auto max-h-[460px]">
+                    <table class="w-full text-left text-xs border-collapse" id="data-table">
+                        <thead class="bg-slate-950 text-slate-400 sticky top-0 z-10 border-b border-slate-800 font-semibold" id="table-head">
+                            <!-- Headers dynamically injected -->
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/60 font-mono" id="table-body">
+                            <!-- Rows dynamically injected -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN: Schema Quick Glance & Query Audit Log (4 cols) -->
+    <div class="lg:col-span-4 space-y-6">
+
+        <!-- 1. Discovered Tables Glance -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center space-x-2">
+                    <i class="fa-solid fa-network-wired text-indigo-400"></i>
+                    <span>Discovered Schema</span>
+                </h3>
+                <button onclick="openSchemaModal()" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium">Explore &rarr;</button>
+            </div>
+
+            <p class="text-xs text-slate-400 mb-3">Tables dynamically linked via foreign keys on <span class="font-mono text-slate-300">{{ active_database }}</span>:</p>
+
+            <div class="grid grid-cols-2 gap-2" id="quick-tables-grid">
+                <!-- Dynamically populated or static fallbacks -->
+                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="font-semibold text-slate-300 font-mono">[loan]</span>
+                        <span class="text-[10px] text-slate-500">Loans</span>
+                    </div>
+                </div>
+                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="font-semibold text-slate-300 font-mono">[account]</span>
+                        <span class="text-[10px] text-slate-500">Accounts</span>
+                    </div>
+                </div>
+                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="font-semibold text-slate-300 font-mono">[client]</span>
+                        <span class="text-[10px] text-slate-500">Demographics</span>
+                    </div>
+                </div>
+                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="font-semibold text-slate-300 font-mono">[disp]</span>
+                        <span class="text-[10px] text-indigo-400">FK Bridge</span>
+                    </div>
+                </div>
+                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="font-semibold text-slate-300 font-mono">[card]</span>
+                        <span class="text-[10px] text-slate-500">Cards</span>
+                    </div>
+                </div>
+                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="font-semibold text-slate-300 font-mono">[district]</span>
+                        <span class="text-[10px] text-slate-500">Regions</span>
+                    </div>
+                </div>
+                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="font-semibold text-slate-300 font-mono">[order]</span>
+                        <span class="text-[10px] text-slate-500">Orders</span>
+                    </div>
+                </div>
+                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="font-semibold text-slate-300 font-mono">[trans]</span>
+                        <span class="text-[10px] text-slate-500">Transactions</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Recent Query Audit Log -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center space-x-2">
+                    <i class="fa-solid fa-clock-rotate-left text-indigo-400"></i>
+                    <span>Recent Query Log</span>
+                </h3>
+                <span class="text-[11px] text-slate-500" id="history-count">Audit Trail</span>
+            </div>
+
+            <div class="space-y-2.5 max-h-[440px] overflow-y-auto pr-1" id="history-list">
+                {% for q in recent_queries %}
+                <div class="p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition cursor-pointer" onclick="setQuery('{{ q.question|escapejs }}')">
+                    <div class="flex items-center justify-between mb-1">
+                        {% if q.status == 'SUCCESS' %}
+                        <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">SUCCESS</span>
+                        {% elif q.status == 'BLOCKED' %}
+                        <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20">BLOCKED</span>
+                        {% elif q.status == 'CHIT_CHAT' %}
+                        <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">CHAT</span>
+                        {% else %}
+                        <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">ERROR</span>
+                        {% endif %}
+                        <span class="text-[11px] text-slate-500 font-mono">{{ q.created_at|timesince }} ago</span>
+                    </div>
+                    <p class="text-xs text-slate-200 line-clamp-2">{{ q.question }}</p>
+                    {% if q.generated_sql %}
+                    <p class="text-[11px] font-mono text-slate-400 truncate mt-1 text-indigo-300/80">{{ q.generated_sql }}</p>
+                    {% endif %}
+                </div>
+                {% empty %}
+                <div class="text-center py-6 text-slate-500 text-xs">
+                    <i class="fa-regular fa-folder-open text-2xl mb-2 text-slate-600 block"></i>
+                    No recent queries yet. Try asking a question above!
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+<!-- SCHEMA EXPLORER MODAL -->
+<div id="schema-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+        <!-- Modal Header -->
+        <div class="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900">
+            <div class="flex items-center space-x-3">
+                <div class="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                    <i class="fa-solid fa-database text-base"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white">Live Schema Explorer</h3>
+                    <p class="text-xs text-slate-400" id="modal-db-title">Microsoft SQL Server (.\SQLEXPRESS / financial)</p>
+                </div>
+            </div>
+            <button onclick="closeSchemaModal()" class="text-slate-400 hover:text-white p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="p-6 overflow-y-auto flex-1 space-y-6" id="schema-modal-body">
+            <div class="text-center py-8 text-slate-400 text-xs">
+                <i class="fa-solid fa-circle-notch animate-spin text-xl text-indigo-400 mb-2 block"></i>
+                Loading live tables from SQL Server...
+            </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="p-4 border-t border-slate-800 bg-slate-950 flex justify-between items-center text-xs text-slate-400">
+            <span>Dynamic foreign key links discovered via SQLAlchemy inspector</span>
+            <button onclick="closeSchemaModal()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-medium transition">Close</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentResults = null;
+
+    // Hotkey: Ctrl+Enter executes query
+    document.getElementById('query-input').addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            executeQuery();
+        }
+    });
+
+    function setQuery(text) {
+        const input = document.getElementById('query-input');
+        input.value = text;
+        input.focus();
+    }
+
+    function clearQuery() {
+        document.getElementById('query-input').value = '';
+        document.getElementById('query-input').focus();
+    }
+
+    async function executeQuery() {
+        const input = document.getElementById('query-input');
+        const question = input.value.trim();
+        if (!question) return;
+
+        const roleSelect = document.getElementById('staff-role-select');
+        const role = roleSelect ? roleSelect.value : 'Analyst';
+
+        // UI: Show loading, hide old panels
+        document.getElementById('loading-state').classList.remove('hidden');
+        document.getElementById('sql-results-panel').classList.add('hidden');
+        document.getElementById('chit-chat-card').classList.add('hidden');
+        document.getElementById('error-card').classList.add('hidden');
+        document.getElementById('run-btn').disabled = true;
+
+        try {
+            const resp = await fetch('/api/query/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ question, role })
+            });
+
+            const data = await resp.json();
+            currentResults = data;
+
+            // Hide loading
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('run-btn').disabled = false;
+
+            // 1. Handle Chit-chat or greeting
+            if (data.is_chit_chat && !data.generated_sql) {
+                document.getElementById('chit-chat-card').classList.remove('hidden');
+                document.getElementById('chit-chat-text').textContent = data.explanation || "Hello! Ask me any question regarding accounts, loans, cards, or clients.";
+                reloadHistory();
+                return;
+            }
+
+            // 2. Handle Error / Guardrail Block
+            if (!data.success) {
+                document.getElementById('error-card').classList.remove('hidden');
+                document.getElementById('error-title').textContent = data.status === 'BLOCKED' ? 'Security Policy Violation' : 'Execution Error';
+                document.getElementById('error-desc').textContent = data.error || "An unexpected error occurred.";
+                
+                // Still show generated SQL if it was produced before being blocked
+                if (data.generated_sql) {
+                    renderSQLPanel(data);
+                }
+                reloadHistory();
+                return;
+            }
+
+            // 3. Render Normal SQL & Data Table Result
+            renderSQLPanel(data);
+            renderDataTable(data);
+            reloadHistory();
+
+        } catch (err) {
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('run-btn').disabled = false;
+            document.getElementById('error-card').classList.remove('hidden');
+            document.getElementById('error-title').textContent = 'Request Failed';
+            document.getElementById('error-desc').textContent = err.message;
+        }
+    }
+
+    function renderSQLPanel(data) {
+        const panel = document.getElementById('sql-results-panel');
+        panel.classList.remove('hidden');
+
+        // SQL Code Display
+        const codeElement = document.getElementById('sql-code-display');
+        codeElement.textContent = data.generated_sql || '-- No SQL generated';
+        Prism.highlightElement(codeElement);
+
+        // Metadata badges
+        document.getElementById('domain-badge').textContent = data.detected_domain || 'Banking';
+        document.getElementById('time-badge').textContent = `${data.elapsed_time_ms || 0}ms`;
+        document.getElementById('sql-explanation-text').textContent = data.explanation || 'No explanation provided.';
+    }
+
+    function renderDataTable(data) {
+        const thead = document.getElementById('table-head');
+        const tbody = document.getElementById('table-body');
+        thead.innerHTML = '';
+        tbody.innerHTML = '';
+
+        const columns = data.columns || [];
+        const rows = data.rows || [];
+
+        document.getElementById('table-row-count').textContent = `${rows.length} rows returned from local SQL Server`;
+
+        // Render Head
+        if (columns.length > 0) {
+            const tr = document.createElement('tr');
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.className = 'px-4 py-3 font-semibold text-slate-300 uppercase tracking-wider text-[11px]';
+                th.textContent = col;
+                tr.appendChild(th);
+            });
+            thead.appendChild(tr);
+        }
+
+        // Render Rows
+        if (rows.length === 0) {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = Math.max(columns.length, 1);
+            td.className = 'px-4 py-8 text-center text-slate-500 text-xs font-sans';
+            td.textContent = 'Query executed successfully, but returned 0 rows.';
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+            return;
+        }
+
+        rows.forEach((row, idx) => {
+            const tr = document.createElement('tr');
+            tr.className = idx % 2 === 0 ? 'bg-slate-900/40 hover:bg-slate-800/50 transition' : 'bg-slate-950 hover:bg-slate-800/50 transition';
+
+            row.forEach(val => {
+                const td = document.createElement('td');
+                td.className = 'px-4 py-2.5 whitespace-nowrap text-xs text-slate-300';
+                if (val === null || val === undefined) {
+                    td.innerHTML = '<span class="text-slate-600 italic">null</span>';
+                } else {
+                    td.textContent = val;
+                }
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+    }
+
+    function copySQL() {
+        const code = document.getElementById('sql-code-display').textContent;
+        navigator.clipboard.writeText(code).then(() => {
+            const copyBtn = document.getElementById('copy-text');
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+        });
+    }
+
+    function filterTable() {
+        const filter = document.getElementById('table-filter-input').value.toLowerCase();
+        const rows = document.getElementById('table-body').getElementsByTagName('tr');
+        for (let i = 0; i < rows.length; i++) {
+            const text = rows[i].textContent.toLowerCase();
+            rows[i].style.display = text.includes(filter) ? '' : 'none';
+        }
+    }
+
+    function exportCSV() {
+        if (!currentResults || !currentResults.rows || currentResults.rows.length === 0) {
+            alert('No data rows available to export.');
+            return;
+        }
+        const cols = currentResults.columns;
+        const rows = currentResults.rows;
+
+        let csvContent = 'data:text/csv;charset=utf-8,';
+        csvContent += cols.map(c => `"${c}"`).join(',') + '\n';
+
+        rows.forEach(r => {
+            csvContent += r.map(v => `"${v !== null ? String(v).replace(/"/g, '""') : ''}"`).join(',') + '\n';
+        });
+
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement('a');
+        link.setAttribute('href', encodedUri);
+        link.setAttribute('download', `bank_query_export_${Date.now()}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    async function reloadHistory() {
+        try {
+            const res = await fetch('/api/history/');
+            const data = await res.json();
+            const list = document.getElementById('history-list');
+            if (!data.history || data.history.length === 0) return;
+
+            list.innerHTML = '';
+            data.history.slice(0, 10).forEach(h => {
+                let badgeClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+                if (h.status === 'BLOCKED') badgeClass = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+                if (h.status === 'CHIT_CHAT') badgeClass = 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
+                if (h.status === 'ERROR') badgeClass = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+
+                const card = document.createElement('div');
+                card.className = 'p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition cursor-pointer';
+                card.onclick = () => setQuery(h.question);
+
+                card.innerHTML = `
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-[10px] font-bold px-1.5 py-0.5 rounded border ${badgeClass}">${h.status}</span>
+                        <span class="text-[11px] text-slate-500 font-mono">${h.execution_time_ms ? h.execution_time_ms + 'ms' : ''}</span>
+                    </div>
+                    <p class="text-xs text-slate-200 line-clamp-2">${h.question}</p>
+                    ${h.generated_sql ? `<p class="text-[11px] font-mono text-indigo-300/80 truncate mt-1">${h.generated_sql}</p>` : ''}
+                `;
+                list.appendChild(card);
+            });
+        } catch (e) {
+            console.error('Failed to reload history:', e);
+        }
+    }
+
+    // Modal logic
+    async function openSchemaModal() {
+        const modal = document.getElementById('schema-modal');
+        modal.classList.remove('hidden');
+
+        const body = document.getElementById('schema-modal-body');
+        try {
+            const resp = await fetch('/api/schema/');
+            const data = await resp.json();
+
+            document.getElementById('modal-db-title').textContent = `${data.database_name} (${data.dialect})`;
+
+            let html = `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
+
+            data.tables.forEach(t => {
+                const pkList = t.primary_key.join(', ') || 'None';
+                const related = t.related_tables.map(r => `[${r}]`).join(', ') || 'None';
+
+                html += `
+                    <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-indigo-500/30 transition">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="font-bold text-sm text-indigo-300 font-mono">[${t.name}]</span>
+                            <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">${t.columns.length} cols</span>
+                        </div>
+                        
+                        <div class="text-[11px] text-slate-400 mb-2 space-y-0.5">
+                            <div><span class="text-slate-500">PK:</span> <span class="font-mono text-slate-300">${pkList}</span></div>
+                            <div><span class="text-slate-500">Related Tables:</span> <span class="text-indigo-400 font-mono">${related}</span></div>
+                        </div>
+
+                        <div class="mt-3 border-t border-slate-800/80 pt-2">
+                            <span class="text-[10px] uppercase font-bold text-slate-500 block mb-1">Key Columns:</span>
+                            <div class="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
+                                ${t.columns.map(c => `
+                                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono ${c.is_primary_key ? 'text-amber-300 font-bold border-amber-500/40' : (c.is_foreign_key ? 'text-indigo-300 font-bold border-indigo-500/40' : '')}">
+                                        ${c.column_name} <span class="text-slate-500 text-[9px]">(${c.data_type})</span>
+                                    </span>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+            body.innerHTML = html;
+
+        } catch (e) {
+            body.innerHTML = `<div class="text-rose-400 text-xs p-4 text-center">Failed to load live schema: ${e.message}</div>`;
+        }
+    }
+
+    function closeSchemaModal() {
+        document.getElementById('schema-modal').classList.add('hidden');
+    }
+</script>
+{% endblock %}
+

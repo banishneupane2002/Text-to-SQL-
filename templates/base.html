@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ApexBank | Text-to-SQL Intelligence{% endblock %}</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            400: '#818cf8',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            900: '#312e81',
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <!-- PrismJS for SQL Syntax Highlighting -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+
+    <style>
+        /* Custom scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+<body class="h-full flex flex-col antialiased bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white">
+<!-- 
+    Top Navigation Bar -->
+    <header class="border-b border-slate-800/80 bg-slate-900/90 backdrop-blur sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            
+            <!-- Left: Bank Brand -->
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-emerald-400 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                    <i class="fa-solid fa-building-columns text-white text-lg"></i>
+                </div>
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-base font-bold tracking-tight text-white">BEST<span class="text-indigo-400 font-extrabold">Finance</span></span>
+                        <span class="text-xs px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">SQL Intelligence</span>
+                    </div>
+                    <p class="text-xs text-slate-400">Microsoft SQL Server T-SQL Engine</p>
+                </div>
+            </div>
+
+            <!-- Center: Active Database Status Pill -->
+            <div class="hidden md:flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800/60 border border-slate-700/60 text-xs">
+                <span class="relative flex h-2 w-2">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span class="text-slate-300 font-medium">DB:</span>
+                <span class="text-emerald-400 font-semibold font-mono" id="nav-db-name">{{ active_database|default:".\SQLEXPRESS / financial" }}</span>
+                <span class="text-slate-500">|</span>
+                <span class="text-slate-400">{{ dialect|default:"T-SQL" }}</span>
+            </div>
+
+            <!-- Right: Role Clearance & Quick Actions -->
+            <div class="flex items-center space-x-3">
+                <!-- Role Clearance Selector -->
+                <div class="flex items-center space-x-2 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700 text-xs">
+                    <i class="fa-solid fa-user-shield text-indigo-400"></i>
+                    <span class="text-slate-400">Role:</span>
+                    <select id="staff-role-select" class="bg-transparent text-white font-medium focus:outline-none cursor-pointer">
+                        <option value="Analyst" class="bg-slate-900 text-white">Analyst</option>
+                        <option value="Teller" class="bg-slate-900 text-white">Teller</option>
+                        <option value="Compliance Officer" class="bg-slate-900 text-white">Compliance Officer</option>
+                        <option value="Auditor" class="bg-slate-900 text-white">Auditor</option>
+                    </select>
+                </div>
+
+                <!-- Schema Explorer Button -->
+                <button onclick="openSchemaModal()" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
+                    <i class="fa-solid fa-database text-indigo-400"></i>
+                    <span>Schema</span>
+                </button>
+
+                <!-- Admin Link -->
+                <a href="/admin/" target="_blank" class="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition" title="Django Audit Administration">
+                    <i class="fa-solid fa-gear"></i>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Block -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800/80 bg-slate-900/50 py-3 text-center text-xs text-slate-500">
+        ApexBank Text-to-SQL Pipeline • Powered by Groq (T-SQL Generator) & SQLAlchemy Dynamic FK Graph
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>
+
