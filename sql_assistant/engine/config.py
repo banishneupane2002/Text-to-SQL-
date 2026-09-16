@@ -25,18 +25,3 @@ def get_sqlite_fallback_path() -> str:
     ) if hasattr(settings, 'BASE_DIR') else 'financial.sqlite'
     return getattr(settings, 'SQLITE_FALLBACK_PATH', os.getenv('SQLITE_FALLBACK_PATH', default_path))
 
-
-def get_business_glossary() -> dict:
-    """Loads business glossary YAML dynamically if present."""
-    import yaml
-    base_dir = str(settings.BASE_DIR) if hasattr(settings, 'BASE_DIR') else os.getcwd()
-    glossary_path = os.path.join(base_dir, 'business_glossary.yaml')
-    if os.path.exists(glossary_path):
-        try:
-            with open(glossary_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f) or {}
-        except Exception:
-            return {}
-    return {}
-
-

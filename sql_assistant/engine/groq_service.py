@@ -18,17 +18,20 @@ logger = logging.getLogger("sql_assistant.groq_service")
 SYSTEM_INSTRUCTIONS = """You are an expert banking data analyst who writes precise, safe Microsoft SQL Server (T-SQL) queries.
 Rules:
 - Dialect: Microsoft SQL Server (T-SQL).
-- Row Limiting: Use `SELECT TOP N ...` ONLY when the user explicitly asks for a limit (e.g. 'top 5', 'first 10'). If the user asks for 'all' or no limit, write a standard SELECT.
+- Row Limiting: Use `SELECT TOP 1000 ...`. NEVER use `LIMIT`.
 - Reserved Keywords: Always wrap reserved table and column names in square brackets, e.g. [order].
 - Joins: Connect tables using their matching keys (e.g. ON [client].[district_id] = [district].[district_id]).
 - Read-only SELECT statements only. Never write INSERT, UPDATE, DELETE, or DROP.
 - Return ONLY a single valid JSON object in this exact format:
-  {"generated_sql": "SELECT ...;", "explanation": "Short plain English explanation"}
+  {"generated_sql": "SELECT TOP 1000 ...;", "explanation": "Short plain English explanation"}
 
 INVALID / CHIT-CHAT INPUT RULE:
 - If the user input is a greeting ("hi", "hello"), casual conversation, off-topic question ("who is the president?"), or random gibberish ("asdfasdf"), DO NOT generate any SQL query!
 - Instead, return:
-  {"generated_sql": null, "explanation": "I am your Bank SQL Assistant. Please ask a valid question related to bank accounts, loans, transactions, cards, or clients."}"""
+  {"generated_sql": null, "explanation": "I am your Bank SQL Assistant. Please ask a valid question related to bank accounts, loans, transactions, cards, or clients."}
+Return ONLY a single valid JSON object in this format:
+{"generated_sql": "SELECT ...;", "explanation": "Short plain English explanation"}
+"""
 
 # Few-shot examples tailored for MS SQL Server
 DEFAULT_FEW_SHOTS = [
@@ -118,23 +121,6 @@ def format_schema_block(pruned_schema: Dict[str, Any]) -> str:
         lines.append("KNOWN RELATIONSHIPS:")
         for r in dynamic_relations:
             lines.append(f"  - {r}")
-
-    # Dynamic Business Codes (from decoupled business_glossary.yaml if present)
-    from .config import get_business_glossary
-    glossary = get_business_glossary()
-    codes = glossary.get("codes", {})
-    relevant_codes = []
-    for col_key, mapping in codes.items():
-        tbl = col_key.split('.')[0] if '.' in col_key else col_key
-        if tbl.lower() in [t.lower() for t in active_tables]:
-            mappings_str = ", ".join(f"'{k}' ({v})" for k, v in mapping.items())
-            relevant_codes.append(f"  - [{col_key}]: {mappings_str}")
-
-    if relevant_codes:
-        lines.append("")
-        lines.append("BUSINESS CODES & VALUES:")
-        for rc in relevant_codes:
-            lines.append(rc)
 
     return "\n".join(lines)
 
