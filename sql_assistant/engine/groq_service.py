@@ -15,21 +15,23 @@ from .dynamic_linker import get_dynamic_relationships
 logger = logging.getLogger("sql_assistant.groq_service")
 
 # --- Updated System Instructions from sql_generator.py ---
-SYSTEM_INSTRUCTIONS = """You are an expert banking data analyst who writes precise, safe Microsoft SQL Server (T-SQL) queries.
+SYSTEM_INSTRUCTIONS = """You are an expert enterprise data analyst who writes precise, safe Microsoft SQL Server (T-SQL) queries.
 Rules:
 - Dialect: Microsoft SQL Server (T-SQL).
 - Row Limiting: Use `SELECT TOP N ...` when a specific limit is requested (e.g. 'top 5'). Default to `SELECT TOP 1000 ...` for unconstrained queries to protect memory. NEVER use `LIMIT`.
-- Reserved Keywords: Always wrap reserved table and column names in square brackets, e.g. [order], [trans].
+- Reserved Keywords: Always wrap reserved table and column names in square brackets, e.g. [order], [trans], [Name], [Group].
 - Schema Qualification: When a table has a schema (e.g. Production.Product), reference it as [Schema].[Table] (e.g. [Production].[Product]). NEVER enclose both schema and table in a single bracket like [Production.Product].
-- Joins: Connect tables using their matching primary and foreign keys provided in the KNOWN RELATIONSHIPS (e.g. ON [client].[client_id] = [disp].[client_id]).
+- Column Qualification: Always qualify column names with their table alias when joining multiple tables (e.g. [p].[Name], [soh].[TotalDue]) to prevent ambiguous column errors.
+- Joins: Connect tables using their matching primary and foreign keys provided in the KNOWN RELATIONSHIPS.
+- Safe Math: Use `NULLIF(denominator, 0)` to prevent division-by-zero errors in averages, percentages, and ratios.
 - Read-only SELECT statements only. Never write INSERT, UPDATE, DELETE, or DROP.
-- Constraints: Follow all user constraints (including negative constraints like 'no need to show gender').
+- Constraints: Follow all user constraints (including negative constraints like 'exclude black products').
 - Return ONLY a single valid JSON object in this exact format:
   {"generated_sql": "SELECT ...;", "explanation": "Short plain English explanation"}
 
 INVALID / CHIT-CHAT INPUT RULE:
-- Return {"generated_sql": null, "explanation": "I am your Bank SQL Assistant. Please ask a valid question related to bank accounts, loans, transactions, cards, or clients."} ONLY if the user query is purely a greeting ("hi", "hello"), personal chit-chat ("who are you"), or completely unrelated general trivia ("who won the World Cup?").
-- If the user asks for banking or database entities (accounts, clients, loans, transactions, cards, demographics), ALWAYS generate the valid T-SQL query using the provided tables!"""
+- Return {"generated_sql": null, "explanation": "I am your SQL Assistant. Please ask a valid data question related to database entities (such as products, sales, customers, employees, or accounts)."} ONLY if the user query is purely a greeting ("hi", "hello"), personal chit-chat ("who are you"), or completely unrelated trivia ("who won the game?").
+- If the user asks for database entities or queries, ALWAYS generate the valid T-SQL query using the provided tables!"""
 
 
 # Few-shot examples tailored for MS SQL Server
@@ -57,15 +59,22 @@ DEFAULT_FEW_SHOTS = [
 ]
 
 PREFERRED_GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
     "openai/gpt-oss-20b",
-    "qwen/qwen3-32b",
+    "openai/gpt-oss-120b",
     "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
 ]
 
 _NON_CHAT_HINTS = ["whisper", "tts", "guard", "safeguard", "moderation", "prompt-guard"]
 _GROQ_MODEL_CACHE: Optional[str] = None
+_LAST_MODEL_USED: Optional[str] = None
+
+
+def get_last_used_model() -> str:
+    """Returns the model name that successfully completed the last query."""
+    global _LAST_MODEL_USED
+    return _LAST_MODEL_USED or get_groq_model() or "llama-3.1-8b-instant"
 
 
 def discover_groq_model(client: Groq) -> str:
@@ -177,15 +186,48 @@ def call_groq(messages: List[Dict[str, str]], model_override: Optional[str] = No
     else:
         resolved_model = discover_groq_model(client)
 
-    logger.info(f"Calling Groq with model: {resolved_model}")
-    resp = client.chat.completions.create(
-        model=resolved_model,
-        messages=messages,
-        temperature=0.1,
-        max_tokens=3000,
-        response_format={"type": "json_object"},
-    )
-    return resp.choices[0].message.content
+    global _LAST_MODEL_USED
+    models_to_try = [resolved_model]
+    for fallback in ["qwen/qwen3.8-27b", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]:
+        if fallback not in models_to_try:
+            models_to_try.append(fallback)
+
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            logger.info(f"Calling Groq with model: {model_name}")
+            resp = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=1500,
+                response_format={"type": "json_object"},
+            )
+            _LAST_MODEL_USED = model_name
+            return resp.choices[0].message.content
+        except Exception as err:
+            err_str = str(err).lower()
+            # If rate limited, model not found, or strict JSON validation failed, fail over
+            if any(k in err_str for k in ["429", "rate_limit", "rate limit", "503", "unavailable", "capacity", "overloaded", "400", "json_validate_failed", "failed to validate json", "404", "model_not_found", "does not exist"]):
+                logger.warning(f"Groq {model_name} issue ({err}). Failing over to next model...")
+                last_error = err
+                # If json_validate_failed, try once more without response_format constraint on this model
+                if "json_validate_failed" in err_str or "failed to validate json" in err_str:
+                    try:
+                        resp = client.chat.completions.create(
+                            model=model_name,
+                            messages=messages,
+                            temperature=0.1,
+                            max_tokens=1500,
+                        )
+                        _LAST_MODEL_USED = model_name
+                        return resp.choices[0].message.content
+                    except Exception:
+                        pass
+                continue
+            raise err
+
+    raise last_error
 
 
 def parse_structured_output(raw_text: str) -> Dict[str, Any]:

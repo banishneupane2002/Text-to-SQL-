@@ -88,8 +88,8 @@
                 <div class="bg-slate-800/60 px-5 py-3 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
                     <div class="flex items-center space-x-2">
                         <span class="px-2 py-0.5 text-xs font-bold font-mono uppercase rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">T-SQL</span>
-                        <span class="text-xs font-semibold text-slate-300">Generated Microsoft SQL Server Query</span>
                         <span id="domain-badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 font-medium">Loans</span>
+                        <span id="model-badge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-indigo-400">llama-3.1-8b-instant</span>
                     </div>
                     
                     <div class="flex items-center space-x-3 text-xs">
@@ -352,6 +352,10 @@
         // Metadata badges
         document.getElementById('domain-badge').textContent = data.detected_domain || 'Banking';
         document.getElementById('time-badge').textContent = `${data.elapsed_time_ms || 0}ms`;
+        const modelBadge = document.getElementById('model-badge');
+        if (modelBadge && data.model_used) {
+            modelBadge.textContent = data.model_used;
+        }
         document.getElementById('sql-explanation-text').textContent = data.explanation || 'No explanation provided.';
     }
 
@@ -493,16 +497,7 @@
             const resp = await fetch('/api/schema/');
             const data = await resp.json();
 
-            if (data.error) {
-                body.innerHTML = `<div class="text-rose-400 text-xs p-4 text-center">Failed to load live schema: ${data.error}</div>`;
-                return;
-            }
-
             document.getElementById('modal-db-title').textContent = `${data.database_name} (${data.dialect})`;
-            const searchInput = document.getElementById('schema-search-input');
-            if (searchInput && data.total_tables) {
-                searchInput.placeholder = `Search all ${data.total_tables} tables...`;
-            }
 
             let html = `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
 

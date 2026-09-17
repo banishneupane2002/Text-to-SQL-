@@ -14,32 +14,37 @@ from .models import QueryHistory, SavedQuery
 
 logger = logging.getLogger("sql_assistant.views")
 
-# Curated sample queries for bank staff
+# Curated sample queries for intelligence dashboard
 CURATED_SUGGESTIONS = [
     {
-        "domain": "Loans & Risk",
-        "question": "Show the top 5 accounts with largest loan amounts, along with their duration and status.",
-        "badge": "Top Borrowers"
+        "domain": "Sales & Revenue",
+        "question": "Which top 5 sales representatives generated the highest total sales revenue, including their full name and total amount sold?",
+        "badge": "Top Sales Reps"
     },
     {
-        "domain": "Credit Cards",
-        "question": "How many female clients have been issued a classic credit card?",
-        "badge": "Bridge Join"
+        "domain": "Human Resources",
+        "question": "Show the average hourly pay rate and total number of employees for each department, ordered by highest average rate.",
+        "badge": "Department Pay"
     },
     {
-        "domain": "Demographics",
-        "question": "Which 5 districts have the highest number of clients?",
-        "badge": "Regional"
+        "domain": "Sales Analytics",
+        "question": "Show the total sales revenue and order count for each sales territory in the year 2013, ordered by total revenue descending.",
+        "badge": "Territory 2013"
     },
     {
-        "domain": "Accounts & Payments",
-        "question": "What is the total loan amount and average monthly payment for active loans with status 'A'?",
-        "badge": "Aggregations"
+        "domain": "Production & Inventory",
+        "question": "List the product subcategories that have a total inventory quantity of less than 1,000 units across all storage locations, along with their total stock.",
+        "badge": "Low Stock Alert"
     },
     {
-        "domain": "Transactions",
-        "question": "Show me the total amount and count of permanent orders for household payments with symbol SIPO.",
-        "badge": "Standing Orders"
+        "domain": "Customer Intelligence",
+        "question": "Show the top 5 customers who have spent the most money, including their full name, email address, and total amount spent.",
+        "badge": "VIP Customers"
+    },
+    {
+        "domain": "Purchasing & Procurement",
+        "question": "Which 5 vendors have the highest total purchase order amounts, showing the vendor name and total order value?",
+        "badge": "Top Vendors"
     },
 ]
 
@@ -117,6 +122,7 @@ def api_execute_query(request):
             "database_target": res.get("database_target"),
             "dialect": res.get("dialect"),
             "elapsed_time_ms": res.get("elapsed_time_ms"),
+            "model_used": res.get("model_used", "llama-3.1-8b-instant"),
             "columns": validation.get("columns", []),
             "rows": validation.get("rows", []),
             "rows_count": validation.get("rows_count", 0),

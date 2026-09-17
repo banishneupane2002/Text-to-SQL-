@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 
 from .db_manager import get_database_engine, extract_live_metadata
 from .retrieval import run_retrieval_pipeline
-from .groq_service import build_prompt, call_groq, parse_structured_output
+from .groq_service import build_prompt, call_groq, parse_structured_output, get_last_used_model
 from .security_guardrail import execute_safe_query
 from .dynamic_linker import get_table_adjacency_graph
 
@@ -114,6 +114,7 @@ def text_to_sql(question: str, validate: bool = True, backend: str = "groq") -> 
         "database_target": db_name,
         "dialect": dialect,
         "elapsed_time_ms": elapsed,
+        "model_used": get_last_used_model(),
         "validation": validation_result
     }
 

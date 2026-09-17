@@ -153,18 +153,7 @@ def extract_live_metadata(force_refresh: bool = False) -> Dict[str, Any]:
                     res = conn.execute(sa_text(f"SELECT TOP 2 * FROM {qualified_select}"))
                 else:
                     res = conn.execute(sa_text(f'SELECT * FROM "{tbl}" LIMIT 2'))
-                for r in res:
-                    row_dict = {}
-                    for k, v in dict(r._mapping).items():
-                        if isinstance(v, (bytes, bytearray, memoryview)):
-                            row_dict[k] = f"<binary {len(v)} bytes>"
-                        elif hasattr(v, "isoformat"):
-                            row_dict[k] = v.isoformat()
-                        elif isinstance(v, (int, float, str, bool)) or v is None:
-                            row_dict[k] = v
-                        else:
-                            row_dict[k] = str(v)
-                    sample_rows.append(row_dict)
+                sample_rows = [dict(r._mapping) for r in res]
         except Exception:
             pass
 
