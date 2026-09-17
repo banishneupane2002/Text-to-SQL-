@@ -74,7 +74,7 @@ def text_to_sql(question: str, validate: bool = True, backend: str = "groq") -> 
     engine, dialect, db_name = get_database_engine()
 
     # 3. Retrieval Pipeline (Intent -> Tables -> Columns)
-    retrieval_res = run_retrieval_pipeline(question, top_k_tables=5, max_cols_per_table=8)
+    retrieval_res = run_retrieval_pipeline(question, top_k_tables=6, max_cols_per_table=8)
     pruned_schema = retrieval_res["pruned_schema"]
     detected_domain = retrieval_res["detected_domain"]
     candidate_tables = retrieval_res["candidate_tables"]

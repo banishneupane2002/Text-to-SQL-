@@ -21,7 +21,7 @@
 
             <!-- Input area -->
             <div class="relative">
-                <textarea id="query-input" rows="2" 
+                <textarea id="query-input" rows="4" 
                     placeholder="e.g. Show top 5 accounts with largest loan amounts and their status..."
                     class="w-full bg-slate-950/80 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition resize-none"></textarea>
                 
@@ -163,75 +163,10 @@
 
     </div>
 
-    <!-- RIGHT COLUMN: Schema Quick Glance & Query Audit Log (4 cols) -->
+    <!-- RIGHT COLUMN: Recent Query Audit Log (4 cols) -->
     <div class="lg:col-span-4 space-y-6">
 
-        <!-- 1. Discovered Tables Glance -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
-            <div class="flex items-center justify-between mb-3">
-                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center space-x-2">
-                    <i class="fa-solid fa-network-wired text-indigo-400"></i>
-                    <span>Discovered Schema</span>
-                </h3>
-                <button onclick="openSchemaModal()" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium">Explore &rarr;</button>
-            </div>
-
-            <p class="text-xs text-slate-400 mb-3">Tables dynamically linked via foreign keys on <span class="font-mono text-slate-300">{{ active_database }}</span>:</p>
-
-            <div class="grid grid-cols-2 gap-2" id="quick-tables-grid">
-                <!-- Dynamically populated or static fallbacks -->
-                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
-                    <div class="flex items-center justify-between text-xs">
-                        <span class="font-semibold text-slate-300 font-mono">[loan]</span>
-                        <span class="text-[10px] text-slate-500">Loans</span>
-                    </div>
-                </div>
-                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
-                    <div class="flex items-center justify-between text-xs">
-                        <span class="font-semibold text-slate-300 font-mono">[account]</span>
-                        <span class="text-[10px] text-slate-500">Accounts</span>
-                    </div>
-                </div>
-                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
-                    <div class="flex items-center justify-between text-xs">
-                        <span class="font-semibold text-slate-300 font-mono">[client]</span>
-                        <span class="text-[10px] text-slate-500">Demographics</span>
-                    </div>
-                </div>
-                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
-                    <div class="flex items-center justify-between text-xs">
-                        <span class="font-semibold text-slate-300 font-mono">[disp]</span>
-                        <span class="text-[10px] text-indigo-400">FK Bridge</span>
-                    </div>
-                </div>
-                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
-                    <div class="flex items-center justify-between text-xs">
-                        <span class="font-semibold text-slate-300 font-mono">[card]</span>
-                        <span class="text-[10px] text-slate-500">Cards</span>
-                    </div>
-                </div>
-                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
-                    <div class="flex items-center justify-between text-xs">
-                        <span class="font-semibold text-slate-300 font-mono">[district]</span>
-                        <span class="text-[10px] text-slate-500">Regions</span>
-                    </div>
-                </div>
-                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
-                    <div class="flex items-center justify-between text-xs">
-                        <span class="font-semibold text-slate-300 font-mono">[order]</span>
-                        <span class="text-[10px] text-slate-500">Orders</span>
-                    </div>
-                </div>
-                <div class="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition">
-                    <div class="flex items-center justify-between text-xs">
-                        <span class="font-semibold text-slate-300 font-mono">[trans]</span>
-                        <span class="text-[10px] text-slate-500">Transactions</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 2. Recent Query Audit Log -->
+        <!-- Recent Query Audit Log -->
         <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
             <div class="flex items-center justify-between mb-3">
                 <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center space-x-2">
@@ -241,7 +176,7 @@
                 <span class="text-[11px] text-slate-500" id="history-count">Audit Trail</span>
             </div>
 
-            <div class="space-y-2.5 max-h-[440px] overflow-y-auto pr-1" id="history-list">
+            <div class="space-y-2.5 max-h-[640px] overflow-y-auto pr-1" id="history-list">
                 {% for q in recent_queries %}
                 <div class="p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition cursor-pointer" onclick="setQuery('{{ q.question|escapejs }}')">
                     <div class="flex items-center justify-between mb-1">
@@ -288,9 +223,15 @@
                     <p class="text-xs text-slate-400" id="modal-db-title">Microsoft SQL Server (.\SQLEXPRESS / financial)</p>
                 </div>
             </div>
-            <button onclick="closeSchemaModal()" class="text-slate-400 hover:text-white p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
+            <div class="flex items-center space-x-3">
+                <div class="relative">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500 text-xs"></i>
+                    <input type="text" id="schema-search-input" oninput="filterSchemaCards()" placeholder="Search 71 tables..." class="bg-slate-950/80 border border-slate-700/80 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                </div>
+                <button onclick="closeSchemaModal()" class="text-slate-400 hover:text-white p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
         </div>
 
         <!-- Modal Body -->
@@ -552,7 +493,16 @@
             const resp = await fetch('/api/schema/');
             const data = await resp.json();
 
+            if (data.error) {
+                body.innerHTML = `<div class="text-rose-400 text-xs p-4 text-center">Failed to load live schema: ${data.error}</div>`;
+                return;
+            }
+
             document.getElementById('modal-db-title').textContent = `${data.database_name} (${data.dialect})`;
+            const searchInput = document.getElementById('schema-search-input');
+            if (searchInput && data.total_tables) {
+                searchInput.placeholder = `Search all ${data.total_tables} tables...`;
+            }
 
             let html = `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
 
@@ -561,7 +511,7 @@
                 const related = t.related_tables.map(r => `[${r}]`).join(', ') || 'None';
 
                 html += `
-                    <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-indigo-500/30 transition">
+                    <div class="schema-table-card p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-indigo-500/30 transition">
                         <div class="flex items-center justify-between mb-2">
                             <span class="font-bold text-sm text-indigo-300 font-mono">[${t.name}]</span>
                             <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">${t.columns.length} cols</span>
@@ -592,6 +542,17 @@
         } catch (e) {
             body.innerHTML = `<div class="text-rose-400 text-xs p-4 text-center">Failed to load live schema: ${e.message}</div>`;
         }
+    }
+
+    function filterSchemaCards() {
+        const input = document.getElementById('schema-search-input');
+        if (!input) return;
+        const q = input.value.toLowerCase().trim();
+        const cards = document.querySelectorAll('.schema-table-card');
+        cards.forEach(card => {
+            const text = card.textContent.toLowerCase();
+            card.style.display = text.includes(q) ? '' : 'none';
+        });
     }
 
     function closeSchemaModal() {

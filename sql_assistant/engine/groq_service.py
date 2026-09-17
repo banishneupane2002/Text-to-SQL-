@@ -18,20 +18,19 @@ logger = logging.getLogger("sql_assistant.groq_service")
 SYSTEM_INSTRUCTIONS = """You are an expert banking data analyst who writes precise, safe Microsoft SQL Server (T-SQL) queries.
 Rules:
 - Dialect: Microsoft SQL Server (T-SQL).
-- Row Limiting: Use `SELECT TOP 1000 ...`. NEVER use `LIMIT`.
-- Reserved Keywords: Always wrap reserved table and column names in square brackets, e.g. [order].
-- Joins: Connect tables using their matching keys (e.g. ON [client].[district_id] = [district].[district_id]).
+- Row Limiting: Use `SELECT TOP N ...` when a specific limit is requested (e.g. 'top 5'). Default to `SELECT TOP 1000 ...` for unconstrained queries to protect memory. NEVER use `LIMIT`.
+- Reserved Keywords: Always wrap reserved table and column names in square brackets, e.g. [order], [trans].
+- Schema Qualification: When a table has a schema (e.g. Production.Product), reference it as [Schema].[Table] (e.g. [Production].[Product]). NEVER enclose both schema and table in a single bracket like [Production.Product].
+- Joins: Connect tables using their matching primary and foreign keys provided in the KNOWN RELATIONSHIPS (e.g. ON [client].[client_id] = [disp].[client_id]).
 - Read-only SELECT statements only. Never write INSERT, UPDATE, DELETE, or DROP.
+- Constraints: Follow all user constraints (including negative constraints like 'no need to show gender').
 - Return ONLY a single valid JSON object in this exact format:
-  {"generated_sql": "SELECT TOP 1000 ...;", "explanation": "Short plain English explanation"}
+  {"generated_sql": "SELECT ...;", "explanation": "Short plain English explanation"}
 
 INVALID / CHIT-CHAT INPUT RULE:
-- If the user input is a greeting ("hi", "hello"), casual conversation, off-topic question ("who is the president?"), or random gibberish ("asdfasdf"), DO NOT generate any SQL query!
-- Instead, return:
-  {"generated_sql": null, "explanation": "I am your Bank SQL Assistant. Please ask a valid question related to bank accounts, loans, transactions, cards, or clients."}
-Return ONLY a single valid JSON object in this format:
-{"generated_sql": "SELECT ...;", "explanation": "Short plain English explanation"}
-"""
+- Return {"generated_sql": null, "explanation": "I am your Bank SQL Assistant. Please ask a valid question related to bank accounts, loans, transactions, cards, or clients."} ONLY if the user query is purely a greeting ("hi", "hello"), personal chit-chat ("who are you"), or completely unrelated general trivia ("who won the World Cup?").
+- If the user asks for banking or database entities (accounts, clients, loans, transactions, cards, demographics), ALWAYS generate the valid T-SQL query using the provided tables!"""
+
 
 # Few-shot examples tailored for MS SQL Server
 DEFAULT_FEW_SHOTS = [
@@ -104,7 +103,8 @@ def format_schema_block(pruned_schema: Dict[str, Any]) -> str:
 
     lines = []
     for table_name, columns in pruned_schema.items():
-        lines.append(f"TABLE: [{table_name}]")
+        bracketed_table = ".".join(f"[{p}]" for p in table_name.split("."))
+        lines.append(f"TABLE: {bracketed_table}")
         if isinstance(columns, list):
             for c in columns:
                 col_name = c.get('column_name') or c.get('name') or 'unknown'
@@ -203,8 +203,12 @@ def parse_structured_output(raw_text: str) -> Dict[str, Any]:
             data = json.loads(json_match.group(0))
             if "generated_sql" in data:
                 sql_val = data.get("generated_sql")
+                if sql_val:
+                    sql_str = re.sub(r'\[([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\]', r'[\1].[\2]', str(sql_val).strip())
+                else:
+                    sql_str = None
                 return {
-                    "generated_sql": str(sql_val).strip() if sql_val else None,
+                    "generated_sql": sql_str,
                     "explanation": str(data.get("explanation", "")).strip(),
                 }
         except json.JSONDecodeError:
@@ -213,7 +217,7 @@ def parse_structured_output(raw_text: str) -> Dict[str, Any]:
     # Attempt 2: Regex fallback for SELECT query
     sql_match = re.search(r"(SELECT\b.*?;)", text, flags=re.IGNORECASE | re.DOTALL)
     if sql_match:
-        generated_sql = sql_match.group(1).strip()
+        generated_sql = re.sub(r'\[([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\]', r'[\1].[\2]', sql_match.group(1).strip())
         remainder = (text[:sql_match.start()] + text[sql_match.end():])
         remainder = re.sub(r'"?generated_sql"?\s*:?', "", remainder, flags=re.IGNORECASE)
         remainder = re.sub(r'"?explanation"?\s*:?', "", remainder, flags=re.IGNORECASE)

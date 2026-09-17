@@ -23,6 +23,8 @@ def validate_and_secure_tsql(sql: str) -> str:
 
     # Strip markdown code fences
     clean = re.sub(r"^```(sql|tsql|json)?|```$", "", sql.strip(), flags=re.MULTILINE).strip()
+    # Normalize invalid [schema.table] syntax to valid T-SQL [schema].[table]
+    clean = re.sub(r'\[([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\]', r'[\1].[\2]', clean)
 
     # Parse using T-SQL dialect
     try:

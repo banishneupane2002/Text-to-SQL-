@@ -39,7 +39,9 @@ def get_database_engine() -> Tuple[Engine, str, str]:
     try:
         raw_conn_str = f"DRIVER={{{driver}}};SERVER={server};DATABASE={db_name};Trusted_Connection={trusted};"
         params = urllib.parse.quote_plus(raw_conn_str)
-        mssql_url = f"mssql+pyodbc:///?odbc_connect={params}"
+        mssql_url = f"mssql+pyodbc:///?odbc_connect={params}" 
+
+        # pyodbc is used for connecting to Microsoft SQL Server. The connection string is constructed with the provided server, database, driver, and trusted connection settings. The connection string is then URL-encoded and used to create a SQLAlchemy engine.
 
         engine = create_engine(mssql_url, pool_pre_ping=True)
         # Test connection
@@ -95,37 +97,74 @@ def extract_live_metadata(force_refresh: bool = False) -> Dict[str, Any]:
     inspector = inspect(engine)
 
     catalog = {}
-    table_names = inspector.get_table_names()
-
-    # System/internal tables to ignore
     IGNORED_TABLES = {"sysdiagrams", "sqlite_sequence", "django_migrations", "django_content_type"}
+    SYSTEM_SCHEMAS = {
+        "sys", "information_schema", "guest", "db_accessadmin", "db_backupoperator",
+        "db_datareader", "db_datawriter", "db_ddladmin", "db_denydatareader",
+        "db_denydatawriter", "db_owner", "db_securityadmin"
+    }
 
-    for tbl in table_names:
-        if tbl.lower() in IGNORED_TABLES:
-            continue
+    if dialect == "tsql":
+        raw_schemas = inspector.get_schema_names()
+        user_schemas = [s for s in raw_schemas if s.lower() not in SYSTEM_SCHEMAS]
+        all_tables = []
+        for s in user_schemas:
+            for t in inspector.get_table_names(schema=s):
+                if t.lower() not in IGNORED_TABLES:
+                    all_tables.append((s, t))
+    else:
+        all_tables = [(None, t) for t in inspector.get_table_names() if t.lower() not in IGNORED_TABLES]
 
-        columns = inspector.get_columns(tbl)
-        pk_info = inspector.get_pk_constraint(tbl) or {}
-        pks = pk_info.get("constrained_columns", [])
-        fks = inspector.get_foreign_keys(tbl) or []
+    for schema, tbl in all_tables:
+        display_name = f"{schema}.{tbl}" if schema and schema.lower() != "dbo" else tbl
+        qualified_select = f"[{schema}].[{tbl}]" if schema else f"[{tbl}]"
+
+        try:
+            columns = inspector.get_columns(tbl, schema=schema)
+        except Exception:
+            columns = []
+
+        try:
+            pk_info = inspector.get_pk_constraint(tbl, schema=schema) or {}
+            pks = pk_info.get("constrained_columns", [])
+        except Exception:
+            pks = []
+
+        try:
+            fks = inspector.get_foreign_keys(tbl, schema=schema) or []
+        except Exception:
+            fks = []
 
         fk_lookup = {}
         for fk in fks:
             referred_table = fk.get("referred_table")
+            referred_schema = fk.get("referred_schema")
+            ref_display = f"{referred_schema}.{referred_table}" if referred_schema and referred_schema.lower() != "dbo" else referred_table
             constrained = fk.get("constrained_columns", [])
             referred = fk.get("referred_columns", [])
             for loc_col, rem_col in zip(constrained, referred):
-                fk_lookup[loc_col] = f"{referred_table}.{rem_col}"
+                fk_lookup[loc_col] = f"{ref_display}.{rem_col}"
 
         # Fetch up to 2 sample rows
         sample_rows = []
         try:
             with engine.connect() as conn:
                 if dialect == "tsql":
-                    res = conn.execute(sa_text(f"SELECT TOP 2 * FROM [{tbl}]"))
+                    res = conn.execute(sa_text(f"SELECT TOP 2 * FROM {qualified_select}"))
                 else:
                     res = conn.execute(sa_text(f'SELECT * FROM "{tbl}" LIMIT 2'))
-                sample_rows = [dict(r._mapping) for r in res]
+                for r in res:
+                    row_dict = {}
+                    for k, v in dict(r._mapping).items():
+                        if isinstance(v, (bytes, bytearray, memoryview)):
+                            row_dict[k] = f"<binary {len(v)} bytes>"
+                        elif hasattr(v, "isoformat"):
+                            row_dict[k] = v.isoformat()
+                        elif isinstance(v, (int, float, str, bool)) or v is None:
+                            row_dict[k] = v
+                        else:
+                            row_dict[k] = str(v)
+                    sample_rows.append(row_dict)
         except Exception:
             pass
 
@@ -141,8 +180,9 @@ def extract_live_metadata(force_refresh: bool = False) -> Dict[str, Any]:
                 "references": fk_lookup.get(cname),
             })
 
-        catalog[tbl] = {
-            "table_name": tbl,
+        catalog[display_name] = {
+            "table_name": display_name,
+            "schema": schema,
             "primary_key": pks,
             "foreign_keys": fks,
             "columns": column_meta,
@@ -150,6 +190,6 @@ def extract_live_metadata(force_refresh: bool = False) -> Dict[str, Any]:
         }
 
     _CACHED_CATALOG = catalog
-    logger.info(f"Extracted metadata for {len(catalog)} tables: {list(catalog.keys())}")
+    logger.info(f"Extracted metadata for {len(catalog)} tables: {list(catalog.keys())[:10]}...")
     return catalog
 

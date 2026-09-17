@@ -153,7 +153,7 @@ def api_schema_explorer(request):
     """Returns live database tables, columns, and foreign key graph."""
     try:
         schema = get_schema_summary()
-        return JsonResponse(schema)
+        return JsonResponse(schema, json_dumps_params={'default': str})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
