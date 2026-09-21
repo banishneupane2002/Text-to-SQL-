@@ -123,6 +123,7 @@ def api_execute_query(request):
             "dialect": res.get("dialect"),
             "elapsed_time_ms": res.get("elapsed_time_ms"),
             "model_used": res.get("model_used", "llama-3.1-8b-instant"),
+            "auto_healed": res.get("auto_healed", False),
             "columns": validation.get("columns", []),
             "rows": validation.get("rows", []),
             "rows_count": validation.get("rows_count", 0),

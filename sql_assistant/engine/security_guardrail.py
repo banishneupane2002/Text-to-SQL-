@@ -13,9 +13,10 @@ from sqlalchemy.engine import Engine
 logger = logging.getLogger("sql_assistant.security_guardrail")
 
 
-def validate_and_secure_tsql(sql: str) -> str:
+def validate_and_secure_tsql(sql: str, max_unbounded_rows: int = 500) -> str:
     """
     Validates query against Microsoft SQL Server (T-SQL) rules and enforces read-only safety.
+    Automatically caps unbounded, non-aggregated SELECT queries with TOP 500 to prevent database hanging on million-row tables.
     Raises ValueError on syntax errors or policy violations.
     """
     if not sql or not sql.strip():
@@ -43,10 +44,27 @@ def validate_and_secure_tsql(sql: str) -> str:
             cmd_name = type(node_obj).__name__.upper()
             raise ValueError(f"Security Policy Violation: Modification command '{cmd_name}' is strictly forbidden.")
 
+    # Auto-inject safety TOP limit for open-ended, unbounded SELECT queries without aggregations
+    try:
+        sel = tree if isinstance(tree, exp.Select) else tree.find(exp.Select)
+        if sel:
+            has_limit = sel.args.get("limit") is not None or sel.args.get("offset") is not None
+            has_group = sel.args.get("group") is not None
+            has_agg = any(
+                isinstance(node[0] if isinstance(node, tuple) else node, (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max))
+                for node in sel.walk()
+            )
+            if not has_limit and not has_group and not has_agg:
+                sel.set("limit", exp.Limit(expression=exp.Literal.number(max_unbounded_rows)))
+                clean = tree.sql(dialect="tsql")
+    except Exception as trans_err:
+        logger.warning(f"Could not apply auto-limit: {trans_err}")
+
     return clean
 
 
-def execute_safe_query(generated_sql: str, engine: Engine, dialect: str = "tsql", preview_limit: int = 100) -> Dict[str, Any]:
+
+def execute_safe_query(generated_sql: str, engine: Engine, dialect: str = "tsql", preview_limit: int = 500) -> Dict[str, Any]:
     """
     Executes the validated query safely:
     - On Microsoft SQL Server: executes pure T-SQL directly.

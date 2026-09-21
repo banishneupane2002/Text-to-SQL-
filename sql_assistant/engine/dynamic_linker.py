@@ -38,24 +38,42 @@ def get_table_adjacency_graph() -> Dict[str, List[str]]:
                         graph[cand] = set()
                     graph[cand].add(t_low)
 
-    # 2. From Shared _id Columns (fallback / implicit relationship discovery)
+    # 2. From Implicit Key References (where a table has column target_table + _id or target_table + id)
+    # Avoids false shortcuts between sibling tables (e.g. client and account sharing district_id)
+    tbl_map = {}
+    for t in all_tables:
+        base = t.split(".")[-1].lower()
+        tbl_map[base] = t.lower()
+        if base.endswith("s"):
+            tbl_map[base[:-1]] = t.lower()
+
     cols_map = {}
     for tbl, meta in catalog.items():
-        cols_map[tbl.lower()] = {
+        cols_map[tbl.lower()] = [
             c.get("column_name", "").lower()
             for c in meta.get("columns", [])
             if c.get("column_name")
-        }
+        ]
 
-    t_list = list(cols_map.keys())
-    for i in range(len(t_list)):
-        for j in range(i + 1, len(t_list)):
-            t1, t2 = t_list[i], t_list[j]
-            shared_ids = {
-                c for c in (cols_map[t1] & cols_map[t2])
-                if c.endswith("_id") or c == "id"
-            }
-            if shared_ids:
+    for t1, cols in cols_map.items():
+        for col in cols:
+            if col.endswith("_id") or col.endswith("id"):
+                target = col[:-3] if col.endswith("_id") else col[:-2]
+                if target in tbl_map:
+                    t2 = tbl_map[target]
+                    if t1 != t2:
+                        graph[t1].add(t2)
+                        graph[t2].add(t1)
+
+    # 3. From Shared Primary Key column names (for 1-to-1 extension tables)
+    pk_map = {}
+    for tbl, meta in catalog.items():
+        pks = [pk.lower() for pk in meta.get("primary_key", [])]
+        if pks:
+            pk_map[tbl.lower()] = set(pks)
+    for t1, pks1 in pk_map.items():
+        for t2, pks2 in pk_map.items():
+            if t1 < t2 and (pks1 & pks2):
                 graph[t1].add(t2)
                 graph[t2].add(t1)
 
@@ -123,19 +141,36 @@ def get_dynamic_relationships(candidate_tables: List[str] = None) -> List[str]:
     relations: List[str] = []
     seen: Set[str] = set()
 
-    candidate_lowers = [t.lower() for t in candidate_tables] if candidate_tables else None
+    if candidate_tables:
+        candidate_lowers = set(t.lower() for t in candidate_tables)
+        candidate_unqualified = set(t.lower().split(".")[-1] for t in candidate_tables)
+    else:
+        candidate_lowers = None
+        candidate_unqualified = None
+
+    def matches_candidate(name: Optional[str]) -> bool:
+        if not candidate_lowers:
+            return True
+        if not name:
+            return False
+        n_low = name.lower()
+        return (n_low in candidate_lowers) or (n_low.split(".")[-1] in candidate_unqualified)
 
     # 1. From catalog foreign keys
     for tbl, meta in catalog.items():
-        if candidate_lowers and tbl.lower() not in candidate_lowers:
+        if not matches_candidate(tbl):
             continue
         for fk in meta.get("foreign_keys", []):
             referred_tbl = fk.get("referred_table")
-            if candidate_lowers and referred_tbl and referred_tbl.lower() not in candidate_lowers:
+            if not matches_candidate(referred_tbl):
                 continue
+            ref_schema = fk.get("referred_schema")
+            t_fmt = ".".join(f"[{p}]" for p in tbl.split("."))
+            r_fmt = f"[{ref_schema}].[{referred_tbl}]" if ref_schema and ref_schema.lower() != "dbo" else f"[{referred_tbl}]"
+
             for loc_col, rem_col in zip(fk.get("constrained_columns", []), fk.get("referred_columns", [])):
-                rel_str = f"[{tbl}].[{loc_col}] = [{referred_tbl}].[{rem_col}]"
-                rev_str = f"[{referred_tbl}].[{rem_col}] = [{tbl}].[{loc_col}]"
+                rel_str = f"{t_fmt}.[{loc_col}] = {r_fmt}.[{rem_col}]"
+                rev_str = f"{r_fmt}.[{rem_col}] = {t_fmt}.[{loc_col}]"
                 if rel_str not in seen and rev_str not in seen:
                     relations.append(rel_str)
                     seen.add(rel_str)
@@ -143,7 +178,7 @@ def get_dynamic_relationships(candidate_tables: List[str] = None) -> List[str]:
     # 2. Augment / Fallback: Common ID columns if pairs lack formal foreign keys
     cols_by_table = {}
     for tbl, meta in catalog.items():
-        if candidate_lowers and tbl.lower() not in candidate_lowers:
+        if not matches_candidate(tbl):
             continue
         cols_by_table[tbl] = {
             c.get("column_name", "").lower(): c.get("column_name")
@@ -154,7 +189,8 @@ def get_dynamic_relationships(candidate_tables: List[str] = None) -> List[str]:
     for i in range(len(tbl_names)):
         for j in range(i + 1, len(tbl_names)):
             t1, t2 = tbl_names[i], tbl_names[j]
-            # Check if this pair already has a relationship recorded
+            t1_base = t1.split(".")[-1].lower()
+            t2_base = t2.split(".")[-1].lower()
             pair_already_connected = any(
                 f"[{t1}]" in r and f"[{t2}]" in r for r in relations
             )
@@ -162,12 +198,21 @@ def get_dynamic_relationships(candidate_tables: List[str] = None) -> List[str]:
                 common_ids = set(cols_by_table[t1].keys()) & set(cols_by_table[t2].keys())
                 for cid in common_ids:
                     if cid.endswith("_id") or cid == "id":
-                        c1 = cols_by_table[t1][cid]
-                        c2 = cols_by_table[t2][cid]
-                        rel_str = f"[{t1}].[{c1}] = [{t2}].[{c2}]"
-                        rev_str = f"[{t2}].[{c2}] = [{t1}].[{c1}]"
-                        if rel_str not in seen and rev_str not in seen:
-                            relations.append(rel_str)
-                            seen.add(rel_str)
+                        target = cid[:-3] if cid.endswith("_id") else cid[:-2]
+                        # Only link if one of the tables is the target entity or if cid is a primary key
+                        pks1 = [pk.lower() for pk in catalog.get(t1, {}).get("primary_key", [])]
+                        pks2 = [pk.lower() for pk in catalog.get(t2, {}).get("primary_key", [])]
+                        is_target_entity = (target in (t1_base, t2_base) or f"{target}s" in (t1_base, t2_base))
+                        is_pk = (cid in pks1 or cid in pks2)
+                        if is_target_entity or is_pk:
+                            c1 = cols_by_table[t1][cid]
+                            c2 = cols_by_table[t2][cid]
+                            t1_fmt = ".".join(f"[{p}]" for p in t1.split("."))
+                            t2_fmt = ".".join(f"[{p}]" for p in t2.split("."))
+                            rel_str = f"{t1_fmt}.[{c1}] = {t2_fmt}.[{c2}]"
+                            rev_str = f"{t2_fmt}.[{c2}] = {t1_fmt}.[{c1}]"
+                            if rel_str not in seen and rev_str not in seen:
+                                relations.append(rel_str)
+                                seen.add(rel_str)
 
     return relations

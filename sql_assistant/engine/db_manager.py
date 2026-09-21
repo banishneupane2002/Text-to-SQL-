@@ -83,17 +83,34 @@ def reset_engine():
     _CACHED_CATALOG = None
 
 
+import json
+import re
+
 def extract_live_metadata(force_refresh: bool = False) -> Dict[str, Any]:
     """
     Dynamically extracts tables, columns, data types, primary keys,
-    foreign keys, and sample rows from the connected database.
+    and foreign keys from the connected database, with database-specific disk caching.
     """
     global _CACHED_CATALOG
 
     if _CACHED_CATALOG is not None and not force_refresh:
         return _CACHED_CATALOG
 
-    engine, dialect, _ = get_database_engine()
+    engine, dialect, db_desc = get_database_engine()
+
+    # Database-specific cache: auto-switches when database target in .env changes!
+    safe_db_name = re.sub(r'[^a-zA-Z0-9_]', '_', db_desc)
+    cache_file = os.path.join(os.path.dirname(__file__), f"schema_cache_{safe_db_name}.json")
+
+    if not force_refresh and os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                _CACHED_CATALOG = json.load(f)
+                if _CACHED_CATALOG:
+                    return _CACHED_CATALOG
+        except Exception:
+            pass
+
     inspector = inspect(engine)
 
     catalog = {}
@@ -117,7 +134,6 @@ def extract_live_metadata(force_refresh: bool = False) -> Dict[str, Any]:
 
     for schema, tbl in all_tables:
         display_name = f"{schema}.{tbl}" if schema and schema.lower() != "dbo" else tbl
-        qualified_select = f"[{schema}].[{tbl}]" if schema else f"[{tbl}]"
 
         try:
             columns = inspector.get_columns(tbl, schema=schema)
@@ -145,17 +161,8 @@ def extract_live_metadata(force_refresh: bool = False) -> Dict[str, Any]:
             for loc_col, rem_col in zip(constrained, referred):
                 fk_lookup[loc_col] = f"{ref_display}.{rem_col}"
 
-        # Fetch up to 2 sample rows
+        # Sub-second inspection (sample queries omitted for speed)
         sample_rows = []
-        try:
-            with engine.connect() as conn:
-                if dialect == "tsql":
-                    res = conn.execute(sa_text(f"SELECT TOP 2 * FROM {qualified_select}"))
-                else:
-                    res = conn.execute(sa_text(f'SELECT * FROM "{tbl}" LIMIT 2'))
-                sample_rows = [dict(r._mapping) for r in res]
-        except Exception:
-            pass
 
         column_meta = []
         for col in columns:
@@ -179,6 +186,11 @@ def extract_live_metadata(force_refresh: bool = False) -> Dict[str, Any]:
         }
 
     _CACHED_CATALOG = catalog
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(catalog, f)
+    except Exception as save_err:
+        logger.warning(f"Could not write schema cache: {save_err}")
+
     logger.info(f"Extracted metadata for {len(catalog)} tables: {list(catalog.keys())[:10]}...")
     return catalog
-

@@ -11,6 +11,7 @@ from .retrieval import run_retrieval_pipeline
 from .groq_service import build_prompt, call_groq, parse_structured_output, get_last_used_model
 from .security_guardrail import execute_safe_query
 from .dynamic_linker import get_table_adjacency_graph
+from .self_healing import heal_failed_query
 
 logger = logging.getLogger("sql_assistant.pipeline")
 
@@ -74,7 +75,7 @@ def text_to_sql(question: str, validate: bool = True, backend: str = "groq") -> 
     engine, dialect, db_name = get_database_engine()
 
     # 3. Retrieval Pipeline (Intent -> Tables -> Columns)
-    retrieval_res = run_retrieval_pipeline(question, top_k_tables=6, max_cols_per_table=8)
+    retrieval_res = run_retrieval_pipeline(question, top_k_tables=10, max_cols_per_table=8)
     pruned_schema = retrieval_res["pruned_schema"]
     detected_domain = retrieval_res["detected_domain"]
     candidate_tables = retrieval_res["candidate_tables"]
@@ -95,9 +96,26 @@ def text_to_sql(question: str, validate: bool = True, backend: str = "groq") -> 
         "rows": [],
         "error": None
     }
+    auto_healed = False
 
     if validate and generated_sql:
         validation_result = execute_safe_query(generated_sql, engine, dialect=dialect)
+
+        # 5b. 🛡️ Self-Healing Query Repair (Triggers ONLY on runtime failure)
+        if validation_result.get("success") is False and validation_result.get("error"):
+            healed_ok, healed_sql, healed_expl, healed_val = heal_failed_query(
+                question=question,
+                failed_sql=generated_sql,
+                error_message=validation_result.get("error", ""),
+                engine=engine,
+                dialect=dialect
+            )
+            if healed_ok and healed_sql and healed_val:
+                generated_sql = healed_sql
+                explanation = f"⚡ [Auto-Healed] {healed_expl or explanation}"
+                validation_result = healed_val
+                auto_healed = True
+
     elif not generated_sql:
         # LLM flagged chit-chat or invalid query according to system instructions
         validation_result["success"] = True
@@ -115,6 +133,7 @@ def text_to_sql(question: str, validate: bool = True, backend: str = "groq") -> 
         "dialect": dialect,
         "elapsed_time_ms": elapsed,
         "model_used": get_last_used_model(),
+        "auto_healed": auto_healed,
         "validation": validation_result
     }
 

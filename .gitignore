@@ -36,6 +36,10 @@ ENV/
 *.db
 db.sqlite3
 staticfiles/
+schema_cache*.json
+
+# Scratch & Temporary Scripts
+scratch/
 
 # IDE & OS
 .vscode/

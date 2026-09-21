@@ -18,7 +18,7 @@ logger = logging.getLogger("sql_assistant.groq_service")
 SYSTEM_INSTRUCTIONS = """You are an expert enterprise data analyst who writes precise, safe Microsoft SQL Server (T-SQL) queries.
 Rules:
 - Dialect: Microsoft SQL Server (T-SQL).
-- Row Limiting: Use `SELECT TOP N ...` when a specific limit is requested (e.g. 'top 5'). Default to `SELECT TOP 1000 ...` for unconstrained queries to protect memory. NEVER use `LIMIT`.
+- Row Limiting: Use `SELECT TOP N ...` ONLY when the user explicitly requests a specific limit (e.g. 'top 5', 'first 10', 'highest 3'). For general queries (e.g. 'show me transactions', 'list all departments'), do NOT add `TOP N` or any row limit. NEVER use `LIMIT`.
 - Reserved Keywords: Always wrap reserved table and column names in square brackets, e.g. [order], [trans], [Name], [Group].
 - Schema Qualification: When a table has a schema (e.g. Production.Product), reference it as [Schema].[Table] (e.g. [Production].[Product]). NEVER enclose both schema and table in a single bracket like [Production.Product].
 - Column Qualification: Always qualify column names with their table alias when joining multiple tables (e.g. [p].[Name], [soh].[TotalDue]) to prevent ambiguous column errors.
@@ -123,8 +123,6 @@ def format_schema_block(pruned_schema: Dict[str, Any]) -> str:
 
     active_tables = list(pruned_schema.keys())
     dynamic_relations = get_dynamic_relationships(active_tables)
-    if not dynamic_relations:
-        dynamic_relations = get_dynamic_relationships(None)
 
     if dynamic_relations:
         lines.append("KNOWN RELATIONSHIPS:")
@@ -188,7 +186,13 @@ def call_groq(messages: List[Dict[str, str]], model_override: Optional[str] = No
 
     global _LAST_MODEL_USED
     models_to_try = [resolved_model]
-    for fallback in ["qwen/qwen3.8-27b", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]:
+    for fallback in [
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b",
+        "openai/gpt-oss-20b",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant"
+    ]:
         if fallback not in models_to_try:
             models_to_try.append(fallback)
 
@@ -203,8 +207,11 @@ def call_groq(messages: List[Dict[str, str]], model_override: Optional[str] = No
                 max_tokens=1500,
                 response_format={"type": "json_object"},
             )
-            _LAST_MODEL_USED = model_name
-            return resp.choices[0].message.content
+            content = resp.choices[0].message.content
+            if content and content.strip():
+                _LAST_MODEL_USED = model_name
+                return content
+            logger.warning(f"Groq {model_name} returned empty content. Failing over...")
         except Exception as err:
             err_str = str(err).lower()
             # If rate limited, model not found, or strict JSON validation failed, fail over
@@ -220,8 +227,10 @@ def call_groq(messages: List[Dict[str, str]], model_override: Optional[str] = No
                             temperature=0.1,
                             max_tokens=1500,
                         )
-                        _LAST_MODEL_USED = model_name
-                        return resp.choices[0].message.content
+                        content = resp.choices[0].message.content
+                        if content and content.strip():
+                            _LAST_MODEL_USED = model_name
+                            return content
                     except Exception:
                         pass
                 continue

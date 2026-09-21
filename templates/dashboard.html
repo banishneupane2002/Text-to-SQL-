@@ -90,6 +90,10 @@
                         <span class="px-2 py-0.5 text-xs font-bold font-mono uppercase rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">T-SQL</span>
                         <span id="domain-badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 font-medium">Loans</span>
                         <span id="model-badge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-indigo-400">llama-3.1-8b-instant</span>
+                        <span id="auto-healed-badge" class="hidden text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 inline-flex items-center space-x-1">
+                            <i class="fa-solid fa-wand-magic-sparkles text-emerald-400"></i>
+                            <span>Auto-Healed</span>
+                        </span>
                     </div>
                     
                     <div class="flex items-center space-x-3 text-xs">
@@ -156,6 +160,24 @@
                             <!-- Rows dynamically injected -->
                         </tbody>
                     </table>
+                </div>
+
+                <!-- Table Pagination Bar -->
+                <div id="table-pagination-bar" class="hidden bg-slate-950/90 px-4 py-2.5 border-t border-slate-800 flex items-center justify-between flex-wrap gap-3 text-xs text-slate-400">
+                    <div class="flex items-center space-x-3">
+                        <span id="pagination-info" class="font-mono text-[11px] text-slate-300">Showing 1 to 25 of 100 rows</span>
+                        <div class="flex items-center space-x-1.5">
+                            <span class="text-[11px] text-slate-500">Rows:</span>
+                            <select id="page-size-select" onchange="changePageSize(this.value)" class="bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-0.5 text-[11px] focus:outline-none focus:border-indigo-500">
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-1" id="pagination-buttons">
+                        <!-- Dynamic page buttons -->
+                    </div>
                 </div>
             </div>
 
@@ -254,6 +276,9 @@
 {% block scripts %}
 <script>
     let currentResults = null;
+    let currentPage = 1;
+    let pageSize = 25;
+    let filteredRows = [];
 
     // Hotkey: Ctrl+Enter executes query
     document.getElementById('query-input').addEventListener('keydown', function(e) {
@@ -356,19 +381,26 @@
         if (modelBadge && data.model_used) {
             modelBadge.textContent = data.model_used;
         }
+        const autoHealedBadge = document.getElementById('auto-healed-badge');
+        if (autoHealedBadge) {
+            if (data.auto_healed) {
+                autoHealedBadge.classList.remove('hidden');
+            } else {
+                autoHealedBadge.classList.add('hidden');
+            }
+        }
         document.getElementById('sql-explanation-text').textContent = data.explanation || 'No explanation provided.';
     }
 
     function renderDataTable(data) {
         const thead = document.getElementById('table-head');
-        const tbody = document.getElementById('table-body');
         thead.innerHTML = '';
-        tbody.innerHTML = '';
 
         const columns = data.columns || [];
-        const rows = data.rows || [];
+        filteredRows = (data.rows || []).slice();
+        currentPage = 1;
 
-        document.getElementById('table-row-count').textContent = `${rows.length} rows returned from local SQL Server`;
+        document.getElementById('table-row-count').textContent = `${(data.rows || []).length} rows returned from local SQL Server`;
 
         // Render Head
         if (columns.length > 0) {
@@ -382,19 +414,39 @@
             thead.appendChild(tr);
         }
 
-        // Render Rows
-        if (rows.length === 0) {
+        renderPage();
+    }
+
+    function renderPage() {
+        const tbody = document.getElementById('table-body');
+        tbody.innerHTML = '';
+        const paginationBar = document.getElementById('table-pagination-bar');
+        const columns = (currentResults && currentResults.columns) || [];
+
+        if (filteredRows.length === 0) {
             const tr = document.createElement('tr');
             const td = document.createElement('td');
             td.colSpan = Math.max(columns.length, 1);
             td.className = 'px-4 py-8 text-center text-slate-500 text-xs font-sans';
-            td.textContent = 'Query executed successfully, but returned 0 rows.';
+            td.textContent = (currentResults && currentResults.rows && currentResults.rows.length > 0)
+                ? 'No rows match your filter.'
+                : 'Query executed successfully, but returned 0 rows.';
             tr.appendChild(td);
             tbody.appendChild(tr);
+            if (paginationBar) paginationBar.classList.add('hidden');
             return;
         }
 
-        rows.forEach((row, idx) => {
+        const totalRows = filteredRows.length;
+        const totalPages = Math.ceil(totalRows / pageSize) || 1;
+        if (currentPage > totalPages) currentPage = totalPages;
+        if (currentPage < 1) currentPage = 1;
+
+        const startIdx = (currentPage - 1) * pageSize;
+        const endIdx = Math.min(startIdx + pageSize, totalRows);
+        const pageRows = filteredRows.slice(startIdx, endIdx);
+
+        pageRows.forEach((row, idx) => {
             const tr = document.createElement('tr');
             tr.className = idx % 2 === 0 ? 'bg-slate-900/40 hover:bg-slate-800/50 transition' : 'bg-slate-950 hover:bg-slate-800/50 transition';
 
@@ -410,6 +462,51 @@
             });
             tbody.appendChild(tr);
         });
+
+        // Update Pagination Controls
+        if (paginationBar) {
+            paginationBar.classList.remove('hidden');
+            document.getElementById('pagination-info').textContent = `Showing ${startIdx + 1}–${endIdx} of ${totalRows} rows`;
+
+            const btnContainer = document.getElementById('pagination-buttons');
+            btnContainer.innerHTML = '';
+
+            // Previous Button
+            const prevBtn = document.createElement('button');
+            prevBtn.className = `px-2 py-1 rounded text-xs transition ${currentPage === 1 ? 'text-slate-600 cursor-not-allowed' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`;
+            prevBtn.innerHTML = '<i class="fa-solid fa-chevron-left mr-1"></i> Prev';
+            prevBtn.disabled = currentPage === 1;
+            prevBtn.onclick = () => { if (currentPage > 1) { currentPage--; renderPage(); } };
+            btnContainer.appendChild(prevBtn);
+
+            // Page Buttons (show up to 5 page numbers)
+            let startP = Math.max(1, currentPage - 2);
+            let endP = Math.min(totalPages, startP + 4);
+            if (endP - startP < 4) startP = Math.max(1, endP - 4);
+
+            for (let p = startP; p <= endP; p++) {
+                const pageBtn = document.createElement('button');
+                const isActive = p === currentPage;
+                pageBtn.className = `px-2.5 py-1 rounded text-xs font-mono transition ${isActive ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`;
+                pageBtn.textContent = p;
+                pageBtn.onclick = ((page) => () => { currentPage = page; renderPage(); })(p);
+                btnContainer.appendChild(pageBtn);
+            }
+
+            // Next Button
+            const nextBtn = document.createElement('button');
+            nextBtn.className = `px-2 py-1 rounded text-xs transition ${currentPage === totalPages ? 'text-slate-600 cursor-not-allowed' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`;
+            nextBtn.innerHTML = 'Next <i class="fa-solid fa-chevron-right ml-1"></i>';
+            nextBtn.disabled = currentPage === totalPages;
+            nextBtn.onclick = () => { if (currentPage < totalPages) { currentPage++; renderPage(); } };
+            btnContainer.appendChild(nextBtn);
+        }
+    }
+
+    function changePageSize(size) {
+        pageSize = parseInt(size, 10) || 25;
+        currentPage = 1;
+        renderPage();
     }
 
     function copySQL() {
@@ -422,12 +519,18 @@
     }
 
     function filterTable() {
-        const filter = document.getElementById('table-filter-input').value.toLowerCase();
-        const rows = document.getElementById('table-body').getElementsByTagName('tr');
-        for (let i = 0; i < rows.length; i++) {
-            const text = rows[i].textContent.toLowerCase();
-            rows[i].style.display = text.includes(filter) ? '' : 'none';
+        const filter = document.getElementById('table-filter-input').value.toLowerCase().trim();
+        if (!currentResults || !currentResults.rows) return;
+
+        if (!filter) {
+            filteredRows = currentResults.rows.slice();
+        } else {
+            filteredRows = currentResults.rows.filter(row =>
+                row.some(val => val !== null && String(val).toLowerCase().includes(filter))
+            );
         }
+        currentPage = 1;
+        renderPage();
     }
 
     function exportCSV() {
