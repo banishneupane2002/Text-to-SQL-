@@ -64,7 +64,7 @@ def validate_and_secure_tsql(sql: str, max_unbounded_rows: int = 500) -> str:
 
 
 
-def execute_safe_query(generated_sql: str, engine: Engine, dialect: str = "tsql", preview_limit: int = 500) -> Dict[str, Any]:
+def execute_safe_query(generated_sql: str, engine: Engine, dialect: str = "tsql", preview_limit: int = 1000) -> Dict[str, Any]:
     """
     Executes the validated query safely:
     - On Microsoft SQL Server: executes pure T-SQL directly.

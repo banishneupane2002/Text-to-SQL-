@@ -10,7 +10,7 @@ from .db_manager import get_database_engine, extract_live_metadata
 from .retrieval import run_retrieval_pipeline
 from .groq_service import build_prompt, call_groq, parse_structured_output, get_last_used_model
 from .security_guardrail import execute_safe_query
-from .dynamic_linker import get_table_adjacency_graph
+from .dynamic_linker import get_table_adjacency_graph, get_multihop_bridges
 from .self_healing import heal_failed_query
 
 logger = logging.getLogger("sql_assistant.pipeline")
@@ -88,6 +88,37 @@ def text_to_sql(question: str, validate: bool = True, backend: str = "groq") -> 
     generated_sql = parsed.get("generated_sql")
     explanation = parsed.get("explanation", "")
 
+    # 4b. 🛡️ Self-Healing Schema Recovery:
+    # If the LLM declined because candidate tables were incomplete, do an automatic semantic recovery pass!
+    if not generated_sql and q_clean not in GREETINGS:
+        schema_clues = ["provided schema", "schema does not contain", "missing table", "cannot generate", "does not include", "not available in", "only includes"]
+        expl_low = explanation.lower() if explanation else ""
+        if any(clue in expl_low for clue in schema_clues) or len(candidate_tables) <= 1:
+            logger.info("LLM reported insufficient tables. Triggering Self-Healing Schema Recovery...")
+            all_db_tables = list(extract_live_metadata().keys())
+            from .retrieval import semantic_table_router, column_prune_agent
+            routed_tables = semantic_table_router(question, all_db_tables, max_tables=5)
+            if routed_tables:
+                augmented_tables = list(candidate_tables)
+                for t in routed_tables:
+                    if t not in augmented_tables:
+                        augmented_tables.append(t)
+                new_bridges = get_multihop_bridges(augmented_tables)
+                for b in new_bridges:
+                    for db_t in all_db_tables:
+                        if db_t.lower() == b.lower() and db_t not in augmented_tables:
+                            augmented_tables.append(db_t)
+
+                new_pruned = column_prune_agent(question, augmented_tables)
+                retry_messages = build_prompt(question, new_pruned)
+                retry_raw = call_groq(retry_messages)
+                retry_parsed = parse_structured_output(retry_raw)
+                if retry_parsed.get("generated_sql"):
+                    generated_sql = retry_parsed["generated_sql"]
+                    explanation = retry_parsed.get("explanation", explanation)
+                    candidate_tables = augmented_tables
+                    pruned_schema = new_pruned
+                                                                                                      
     # 5. Execution & Validation
     validation_result: Dict[str, Any] = {
         "success": False,

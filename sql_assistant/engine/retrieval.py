@@ -245,12 +245,14 @@ def table_retrieval_agent(question: str, max_tables: int = 10, detected_domain: 
     # Core tables: tables scoring at least 5.0
     core_tables = [tbl for tbl, sc in sorted(scores.items(), key=lambda x: x[1], reverse=True) if sc >= 5.0]
 
-    # If fast matching found nothing, trigger Semantic Router fallback
-    if not core_tables:
-        logger.info("Fast keyword matching found 0 core tables. Triggering Semantic Router fallback...")
+    # If fast matching found nothing, or only 1 table in an unclassified domain (e.g. 'with name' matching Person.Person)
+    if not core_tables or (len(core_tables) == 1 and detected_domain == "General Data Query"):
+        logger.info("Fast keyword matching insufficient. Triggering Semantic Router fallback...")
         routed = semantic_table_router(question, all_tables, max_tables=min(max_tables, 4))
         if routed:
-            core_tables = routed
+            for r in routed:
+                if r not in core_tables:
+                    core_tables.append(r)
 
     if not core_tables:
         core_tables = [tbl for tbl, sc in sorted(scores.items(), key=lambda x: x[1], reverse=True) if sc > 0.0][:max_tables]
